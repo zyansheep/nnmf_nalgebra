@@ -3,7 +3,7 @@ use std::{ops::{Sub, Div}, iter::Sum};
 use nalgebra::{DMatrix, SMatrix, ComplexField, Scalar, Dim, Matrix, DefaultAllocator, allocator::Allocator, Const, Dyn};
 use rand::{prelude::Distribution, distributions::Standard};
 
-/// Find the N by K and K by C matrix factors of a staticly-sized matrix R by C.s
+/// Does non-negative matrix factorization using multiplicative static update rule as defined on the [wikipedia](https://en.wikipedia.org/wiki/Non-negative_matrix_factorization#Algorithms) page. Is generic over the allocation strategy of the Matrix.
 pub fn non_negative_matrix_factorization_generic<T, R: Dim, C: Dim, K: Dim> (
 	matrix: &Matrix<T, R, C, <DefaultAllocator as Allocator<T, R, C>>::Buffer>,
 	max_iter: usize,
@@ -66,6 +66,7 @@ where
 	(w, h)
 }
 
+/// Does non-negative matrix factorization on a statically-sized matrix (SMatrix)
 pub fn non_negative_matrix_factorization_static<T, const R: usize, const C: usize, const K: usize>(
 	matrix: &SMatrix<T, R, C>,
 	max_iter: usize,
@@ -78,6 +79,7 @@ T: Scalar + ComplexField<RealField = T> + Sub<T> + Clone + Copy + Sum<T> + Parti
 	non_negative_matrix_factorization_generic(matrix, max_iter, tolerance, Const::<R>, Const::<C>, Const::<K>)
 }
 
+/// Does non-negative matrix factorization on a dynamically-sized matrix (DMatrix)
 pub fn non_negative_matrix_factorization_dyn<T>(
 	matrix: &DMatrix<T>,
 	max_iter: usize,
