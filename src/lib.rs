@@ -30,9 +30,15 @@ where
 
 	let mut wh: Matrix<T, R, C, _> = &w * &h;
 
+	let mut wt_v: Matrix<T, K, C, _> = Matrix::zeros_generic(k, ncols);
+	let mut wt_w_h: Matrix<T, K, C, _> = Matrix::zeros_generic(k, ncols);
+
+
+	let mut v_ht: Matrix<T, R, K, _> = Matrix::zeros_generic(nrows, k);
+	let mut w_h_ht: Matrix<T, R, K, _> = Matrix::zeros_generic(nrows, k);
+
 	// Repeat until convergence
     for _ in 0..max_iter {
-
 		// Return if cost is less than tolerance
 		let cost = matrix
 			.iter()
@@ -42,25 +48,33 @@ where
 
 		if cost < tolerance { break; }
 
-		// Numerator & denominator for h update
+		// Calculate W^T
 		w.transpose_to(&mut w_transpose);
 
-		let wt_v: Matrix<T, K, C, _> = &w_transpose * matrix;
-		let wt_w_h: Matrix<T, K, C, _> = &w_transpose * wh;
+		// let wt_v: Matrix<T, K, C, _> = &w_transpose * matrix;
+		// Numerator = W^T * V 
+		w_transpose.mul_to(matrix, &mut wt_v);
+		// Denominator = W^T * W * H
+		w_transpose.mul_to(&wh, &mut wt_w_h);
 
 		// Component-wise update of h
 		h.iter_mut().zip(wt_v.iter().zip(wt_w_h.iter())).map(|(h_old, (num, den))| *h_old = *h_old * (*num / *den)).last().unwrap();
 
-		// Numerator & denominator for w update
+		// Calculate H^T
 		h.transpose_to(&mut h_transpose);
 
-		let v_ht: Matrix<T, R, K, _> = matrix * &h_transpose;
-		let w_h_ht: Matrix<T, R, K, _> = &w * &h * &h_transpose;
+		// WH = W * H
+		w.mul_to(&h, &mut wh);
+
+		// Numerator = V * H^T
+		matrix.mul_to(&h_transpose, &mut v_ht);
+		// Denominator = W * H * H^T
+		wh.mul_to(&h_transpose, &mut w_h_ht);
 
 		// Component-wise update of w
 		w.iter_mut().zip(v_ht.iter().zip(w_h_ht.iter())).map(|(w_old, (num, den))| *w_old = *w_old * (*num / *den)).last().unwrap();
 		
-		wh = &w * &h;
+		w.mul_to(&h, &mut wh);
 	}
 
 	(w, h)
@@ -128,20 +142,5 @@ mod tests {
 
 		println!("Matrix: {}\n Predic: {}", matrix, prediction);
 		assert!(d_matrix.relative_eq(&(w_dyn.clone() * h_dyn.clone()), 0.5, 0.5));
-
-		/* assert_eq!(w, w_dyn);
-		assert_eq!(h, h_dyn); */
-
-		/* let mut nmf = FixedTemplateNmf::new(templates, activation_coef, &input, 0.5);
-
-		for _ in 1..5 {
-			nmf.update_activation_coef();
-		}
-
-		let activation = nmf.get_activation_coef();
-		let result = max_activation_vector(&activation);
-
-		// Note that the max here is index 1 (2.0, 3.0, 1.0)
-		assert_eq!(result, Vector::new(vec![0.0038612997, 0.113134526, 0.003651987, 0.057484213, 0.054535303])); */
 	}
 }
