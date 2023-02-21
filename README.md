@@ -5,5 +5,5 @@ Takes a matrix V of size R*C, splits it into two smaller matricies W (R\*K) and 
  - Uses [multiplicative update rule](https://en.wikipedia.org/wiki/Non-negative_matrix_factorization#Algorithms)
  - Generic over allocation strategy, matrix size, and scalar type.
  - Doesn't do allocation in the loop :)
- - 77 (significant) lines of code!
+ - 195 lines of code!
  - PRs welcome!
