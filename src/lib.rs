@@ -1,28 +1,37 @@
 use std::{ops::{Sub, Div}, iter::Sum};
 
-use nalgebra::{DMatrix, SMatrix, ComplexField, Scalar};
+use nalgebra::{DMatrix, SMatrix, ComplexField, Scalar, Dim, Matrix, DefaultAllocator, allocator::Allocator, Const, Dyn};
 use rand::{prelude::Distribution, distributions::Standard};
 
 /// Find the N by K and K by C matrix factors of a staticly-sized matrix R by C.s
-pub fn non_negative_matrix_factorization<T, const R: usize, const C: usize, const K: usize> (
-	matrix: &SMatrix<T, R, C>,
+pub fn non_negative_matrix_factorization_generic<T, R: Dim, C: Dim, K: Dim> (
+	matrix: &Matrix<T, R, C, <DefaultAllocator as Allocator<T, R, C>>::Buffer>,
 	max_iter: usize,
 	tolerance: T,
-) -> (SMatrix<T, R, K>, SMatrix<T, K, C>)
+	nrows: R,
+	ncols: C,
+	k: K,
+) -> (Matrix<T, R, K, <DefaultAllocator as Allocator<T, R, K>>::Buffer>, Matrix<T, K, C, <DefaultAllocator as Allocator<T, K, C>>::Buffer>)
 where
 	T: Scalar + ComplexField<RealField = T> + Sub<T> + Clone + Copy + Sum<T> + PartialOrd + Div<T, Output = T>,
 	Standard: Distribution<T>,
+	DefaultAllocator: Allocator<T, R, C>,
+	DefaultAllocator: Allocator<T, R, K>,
+	DefaultAllocator: Allocator<T, K, C>,
+	DefaultAllocator: Allocator<T, K, R>,
+	DefaultAllocator: Allocator<T, C, K>,
 {
 	// Two reduced-dimension vectors we are trying to calculate, each field is initialized to [0, 1)
-	let mut w: SMatrix<T, R, K> = SMatrix::new_random();
-	let mut h: SMatrix<T, K, C> = SMatrix::new_random();
+	let mut w: Matrix<T, R, K, _> = Matrix::new_random_generic(nrows, k);
+	let mut h: Matrix<T, K, C, _> = Matrix::new_random_generic(k, ncols);
 
-	let mut w_transpose: SMatrix<T, K, R> = SMatrix::zeros();
-	let mut h_transpose: SMatrix<T, C, K> = SMatrix::zeros();
+	let mut w_transpose: Matrix<T, K, R, _> = Matrix::zeros_generic(k, nrows);
+	let mut h_transpose: Matrix<T, C, K, _> = Matrix::zeros_generic(ncols, k);
+
+	let mut wh: Matrix<T, R, C, _> = &w * &h;
 
 	// Repeat until convergence
     for _ in 0..max_iter {
-		let wh = w * h;
 
 		// Return if cost is less than tolerance
 		let cost = matrix
@@ -36,8 +45,8 @@ where
 		// Numerator & denominator for h update
 		w.transpose_to(&mut w_transpose);
 
-		let wt_v: SMatrix<T, K, C> = w_transpose * matrix;
-		let wt_w_h: SMatrix<T, K, C> = w_transpose * wh;
+		let wt_v: Matrix<T, K, C, _> = &w_transpose * matrix;
+		let wt_w_h: Matrix<T, K, C, _> = &w_transpose * wh;
 
 		// Component-wise update of h
 		h.iter_mut().zip(wt_v.iter().zip(wt_w_h.iter())).map(|(h_old, (num, den))| *h_old = *h_old * (*num / *den)).last().unwrap();
@@ -45,73 +54,43 @@ where
 		// Numerator & denominator for w update
 		h.transpose_to(&mut h_transpose);
 
-		let v_ht: SMatrix<T, R, K> = matrix * h_transpose;
-		let w_h_ht: SMatrix<T, R, K> = w * h * h_transpose;
+		let v_ht: Matrix<T, R, K, _> = matrix * &h_transpose;
+		let w_h_ht: Matrix<T, R, K, _> = &w * &h * &h_transpose;
 
 		// Component-wise update of w
 		w.iter_mut().zip(v_ht.iter().zip(w_h_ht.iter())).map(|(w_old, (num, den))| *w_old = *w_old * (*num / *den)).last().unwrap();
-    }
+		
+		wh = &w * &h;
+	}
 
 	(w, h)
 }
 
-/// Does the same thing as non_negative_matrix_factorization but using heap-allocated matricies. (Oh how I wish statics and dynamics could be abstracted over...)
-pub fn non_negative_matrix_factorization_dyn<T>(
-	matrix: &DMatrix<T>,
-	k: usize,
+pub fn non_negative_matrix_factorization_static<T, const R: usize, const C: usize, const K: usize>(
+	matrix: &SMatrix<T, R, C>,
 	max_iter: usize,
-	tolerance: T,
-) -> (DMatrix<T>, DMatrix<T>)
+	tolerance: T
+) -> (SMatrix<T, R, K>, SMatrix<T, K, C>)
 where
-	T: Scalar + ComplexField<RealField = T> + Sub<T> + Clone + Copy + Sum<T> + PartialOrd + Div<T, Output = T>,
+T: Scalar + ComplexField<RealField = T> + Sub<T> + Clone + Copy + Sum<T> + PartialOrd + Div<T, Output = T>,
 	Standard: Distribution<T>,
 {
-	let (n_rows, n_cols) = matrix.shape();
-	
-	let w = &mut DMatrix::new_random(n_rows, k);
-	let h = &mut DMatrix::new_random(k, n_cols);
-
-	let w_transpose = &mut DMatrix::zeros(k, n_rows);
-	let h_transpose = &mut DMatrix::zeros(n_cols, k);
-
-	let wh = &mut (w.clone() * h.clone());
-
-	// Repeat until convergence
-    for _ in 0..max_iter {
-
-		// Return if cost is less than tolerance
-		let cost = matrix
-			.iter()
-			.zip(wh.iter())
-			.map(|(a, b)| (*a - *b).powi(2))
-			.sum::<T>();
-
-		if cost < tolerance { break; }
-
-		// Numerator & denominator for h update
-		w.transpose_to(w_transpose);
-
-		let wt_v = &*w_transpose * matrix;
-		let wt_w_h = &*w_transpose * &*wh;
-
-		// Component-wise update of h
-		h.iter_mut().zip(wt_v.iter().zip(wt_w_h.iter())).map(|(h_old, (num, den))| *h_old = *h_old * (*num / *den)).last().unwrap();
-
-		// Numerator & denominator for w update
-		h.transpose_to(h_transpose);
-
-		let v_ht = matrix * h_transpose.clone();
-		let w_h_ht = w.clone() * h.clone() * h_transpose.clone();
-
-		// Component-wise update of w
-		w.iter_mut().zip(v_ht.iter().zip(w_h_ht.iter())).map(|(w_old, (num, den))| *w_old = *w_old * (*num / *den)).last().unwrap();
-
-		*wh = w.clone() * h.clone();
-    }
-
-	(w.clone(), h.clone())
+	non_negative_matrix_factorization_generic(matrix, max_iter, tolerance, Const::<R>, Const::<C>, Const::<K>)
 }
 
+pub fn non_negative_matrix_factorization_dyn<T>(
+	matrix: &DMatrix<T>,
+	max_iter: usize,
+	tolerance: T,
+	k: usize,
+) -> (DMatrix<T>, DMatrix<T>)
+where
+T: Scalar + ComplexField<RealField = T> + Sub<T> + Clone + Copy + Sum<T> + PartialOrd + Div<T, Output = T>,
+	Standard: Distribution<T>,
+{
+	let (nrows, ncols) = matrix.shape();
+	non_negative_matrix_factorization_generic(matrix, max_iter, tolerance, Dyn(nrows), Dyn(ncols), Dyn(k))
+}
 
 #[cfg(test)]
 mod tests {
@@ -128,7 +107,7 @@ mod tests {
 			3.0, 1.0, 10.0, 30.0, 1.7
 		];
 		
-		let (w, h) = non_negative_matrix_factorization::<_, 4, 5, 3>(&matrix, 1000, 0.01);
+		let (w, h) = non_negative_matrix_factorization_static::<_, 4, 5, 3>(&matrix, 1000, 0.01);
 		println!("{w}\n{h}");
 		let prediction = w * h;
 
@@ -141,7 +120,7 @@ mod tests {
 			5.0, 1.0, 10.0, 30.0, 1.7;
 			3.0, 1.0, 10.0, 30.0, 1.7
 		];
-		let (w_dyn, h_dyn) = non_negative_matrix_factorization_dyn::<f64>(&d_matrix, 3, 1000, 0.01);
+		let (w_dyn, h_dyn) = non_negative_matrix_factorization_dyn::<f64>(&d_matrix, 1000, 0.01, 3);
 		println!("{w}\n{h}");
 		let prediction = w * h;
 
