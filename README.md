@@ -1,4 +1,13 @@
 # Non-negative Matrix Factorization (with nalgebra)
+<p>
+    <a href="https://docs.rs/nnmf_nalgebra">
+        <img src="https://img.shields.io/docsrs/nnmf_nalgebra.svg" alt="docs.rs">
+    </a>
+    <a href="https://crates.io/crates/nnmf_nalgebra">
+        <img src="https://img.shields.io/crates/v/nnmf_nalgebra.svg" alt="crates.io">
+    </a>
+</p>
+
 
 Takes a matrix V of size R*C, splits it into two smaller matricies W (R\*K) and H (K\*C) such that W * V approximates V.
 
