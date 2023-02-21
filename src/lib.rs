@@ -11,7 +11,10 @@ pub fn non_negative_matrix_factorization_generic<T, R: Dim, C: Dim, K: Dim> (
 	nrows: R,
 	ncols: C,
 	k: K,
-) -> (Matrix<T, R, K, <DefaultAllocator as Allocator<T, R, K>>::Buffer>, Matrix<T, K, C, <DefaultAllocator as Allocator<T, K, C>>::Buffer>)
+) -> (
+	Matrix<T, R, K, <DefaultAllocator as Allocator<T, R, K>>::Buffer>,
+	Matrix<T, K, C, <DefaultAllocator as Allocator<T, K, C>>::Buffer>
+)
 where
 	T: Scalar + ComplexField<RealField = T> + Sub<T> + Clone + Copy + Sum<T> + PartialOrd + Div<T, Output = T>,
 	Standard: Distribution<T>,
