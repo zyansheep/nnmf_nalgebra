@@ -1,12 +1,13 @@
 use std::{
     iter::Sum,
-    ops::{Div, Sub},
+    ops::{Div, Sub, AddAssign, MulAssign},
 };
 
 use nalgebra::{
     allocator::Allocator, ComplexField, Const, DMatrix, DefaultAllocator, Dim, Dyn, Matrix,
     SMatrix, Scalar,
 };
+use num::{Zero, One, Num};
 use rand::{distributions::Standard, prelude::Distribution};
 
 /// Does non-negative matrix factorization using multiplicative static update rule as defined on the [wikipedia](https://en.wikipedia.org/wiki/Non-negative_matrix_factorization#Algorithms) page. Is generic over the allocation strategy of the Matrix.
@@ -14,6 +15,7 @@ pub fn non_negative_matrix_factorization_generic<T, R: Dim, C: Dim, K: Dim>(
     matrix: &Matrix<T, R, C, <DefaultAllocator as Allocator<T, R, C>>::Buffer>,
     max_iter: usize,
     tolerance: T,
+    mut init_fn: impl FnMut(usize, usize) -> T,
     nrows: R,
     ncols: C,
     k: K,
@@ -23,13 +25,9 @@ pub fn non_negative_matrix_factorization_generic<T, R: Dim, C: Dim, K: Dim>(
 )
 where
     T: Scalar
-        + ComplexField<RealField = T>
-        + Sub<T>
+        + Num
         + Clone
-        + Copy
-        + Sum<T>
-        + PartialOrd
-        + Div<T, Output = T>,
+        + Copy + Sum<T> + AddAssign<T> + MulAssign<T> + PartialOrd,
     Standard: Distribution<T>,
     DefaultAllocator: Allocator<T, R, C>,
     DefaultAllocator: Allocator<T, R, K>,
@@ -38,8 +36,8 @@ where
     DefaultAllocator: Allocator<T, C, K>,
 {
     // Two reduced-dimension vectors we are trying to calculate, each field is initialized to [0, 1)
-    let mut w: Matrix<T, R, K, _> = Matrix::new_random_generic(nrows, k);
-    let mut h: Matrix<T, K, C, _> = Matrix::new_random_generic(k, ncols);
+    let mut w: Matrix<T, R, K, _> = Matrix::from_fn_generic(nrows, k, |a,b|init_fn(a,b));
+    let mut h: Matrix<T, K, C, _> = Matrix::from_fn_generic(k, ncols, |a,b|init_fn(a,b));
 
     let mut w_transpose: Matrix<T, K, R, _> = Matrix::zeros_generic(k, nrows);
     let mut h_transpose: Matrix<T, C, K, _> = Matrix::zeros_generic(ncols, k);
@@ -58,7 +56,10 @@ where
         let cost = matrix
             .iter()
             .zip(wh.iter())
-            .map(|(a, b)| (*a - *b).powi(2))
+            .map(|(a, b)| {
+                let diff = *a - *b;
+                diff * diff
+            })
             .sum::<T>();
 
         if cost < tolerance {
@@ -110,20 +111,21 @@ pub fn non_negative_matrix_factorization_static<T, const R: usize, const C: usiz
     matrix: &SMatrix<T, R, C>,
     max_iter: usize,
     tolerance: T,
+    init_fn: impl FnMut(usize, usize) -> T,
 ) -> (SMatrix<T, R, K>, SMatrix<T, K, C>)
 where
     T: Scalar
-        + ComplexField<RealField = T>
-        + Sub<T>
+        + Num
         + Clone
         + Copy
         + Sum<T>
         + PartialOrd
-        + Div<T, Output = T>,
+        + AddAssign<T>
+        + MulAssign<T>,
     Standard: Distribution<T>,
 {
     non_negative_matrix_factorization_generic(
-        matrix, max_iter, tolerance, Const::<R>, Const::<C>, Const::<K>,
+        matrix, max_iter, tolerance, init_fn, Const::<R>, Const::<C>, Const::<K>,
     )
 }
 
@@ -133,6 +135,7 @@ pub fn non_negative_matrix_factorization_dyn<T>(
     max_iter: usize,
     tolerance: T,
     k: usize,
+    init_fn: impl FnMut(usize, usize) -> T
 ) -> (DMatrix<T>, DMatrix<T>)
 where
     T: Scalar
@@ -150,6 +153,7 @@ where
         matrix,
         max_iter,
         tolerance,
+        init_fn,
         Dyn(nrows),
         Dyn(ncols),
         Dyn(k),
@@ -159,11 +163,15 @@ where
 #[cfg(test)]
 mod tests {
     use nalgebra::{dmatrix, matrix, SMatrix};
+    use rand::{Rng, thread_rng};
 
     use crate::*;
 
     #[test]
     fn test_static_and_dyn() {
+        let thread_rng = &mut thread_rng();
+        let mut init_fn = |_,_| thread_rng.gen();
+
         let matrix: SMatrix<f64, 4, 5> = matrix![
             1.0, 2.0, 0.0, 30.0, 1.5;
             0.0, 3.0, 1.0, 30.0, 1.6;
@@ -171,7 +179,7 @@ mod tests {
             3.0, 1.0, 10.0, 30.0, 1.7
         ];
 
-        let (w, h) = non_negative_matrix_factorization_static::<_, 4, 5, 3>(&matrix, 1000, 0.01);
+        let (w, h) = non_negative_matrix_factorization_static::<_, 4, 5, 3>(&matrix, 1000, 0.01, &mut init_fn);
         println!("{w}\n{h}");
         let prediction = w * h;
 
@@ -184,11 +192,40 @@ mod tests {
             5.0, 1.0, 10.0, 30.0, 1.7;
             3.0, 1.0, 10.0, 30.0, 1.7
         ];
-        let (w_dyn, h_dyn) = non_negative_matrix_factorization_dyn::<f64>(&d_matrix, 1000, 0.01, 3);
+        let (w_dyn, h_dyn) = non_negative_matrix_factorization_dyn::<f64>(&d_matrix, 1000, 0.01, 3, &mut init_fn);
         println!("{w}\n{h}");
         let prediction = w * h;
 
         println!("Matrix: {}\n Predic: {}", matrix, prediction);
         assert!(d_matrix.relative_eq(&(w_dyn.clone() * h_dyn.clone()), 0.5, 0.5));
+    }
+
+    #[test]
+    fn test_integer() {
+        let rng = &mut thread_rng();
+
+        let matrix: SMatrix<i64, 5, 5> = matrix![
+            0000, 0200, 5100, 3000, 5000;
+            0300, 0000, 3000, 2100, 3100;
+            5000, 0100, 0000, 0100, 1900;
+            3000, 2000, 0200, 0000, 0300;
+            5000, 3000, 2000, 0200, 0000
+        ];
+
+        let (w, h) = non_negative_matrix_factorization_static::<_, 5, 5, 3>(&matrix, 1000, 10, &mut |_,_| rng.gen_range(10..1000));
+        println!("{w}\n{h}");
+        let prediction = w * h;
+
+        println!("Matrix: {}\n Predic: {}", matrix, prediction);
+
+        let cost = matrix
+            .iter()
+            .zip(prediction.iter())
+            .map(|(a, b)| {
+                let diff = *a - *b;
+                diff * diff
+            })
+            .sum::<i64>();
+        assert!(cost < 100);
     }
 }
